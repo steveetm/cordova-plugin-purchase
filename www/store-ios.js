@@ -2722,10 +2722,18 @@ var protectCall = function (callback, context) {
 var InAppPurchase = function () {
     this.options = {};
 
+    this.receiptForTransaction = {};
+    this.receiptForProduct = {};
     this.transactionForProduct = {};
+
+    
+    if (window.localStorage && window.localStorage.sk_receiptForTransaction)
+	this.receiptForTransaction = JSON.parse(window.localStorage.sk_receiptForTransaction);
+    if (window.localStorage && window.localStorage.sk_receiptForProduct)
+	this.receiptForProduct = JSON.parse(window.localStorage.sk_receiptForProduct);
     if (window.localStorage && window.localStorage.sk_transactionForProduct)
         this.transactionForProduct = JSON.parse(window.localStorage.sk_transactionForProduct);
-
+    
     // Remove support for receipt.forTransaction(...)
     // `appStoreReceipt` is now the only supported receipt format on iOS (drops support for iOS <= 6)
     if (window.localStorage.sk_receiptForTransaction)
@@ -3021,6 +3029,15 @@ InAppPurchase.prototype.updatedTransactionCallback = function (state, errorCode,
         log("product " + productId + " has a transaction in progress: " + transactionIdentifier);
         this.transactionForProduct[productId] = transactionIdentifier;
     }
+    
+    if (transactionReceipt) {
+        this.receiptForProduct[productId] = transactionReceipt;
+        this.receiptForTransaction[transactionIdentifier] = transactionReceipt;
+        if (window.localStorage) {
+    	    window.localStorage.sk_receiptForProduct = JSON.stringify(this.receiptForProduct);
+            window.localStorage.sk_receiptForTransaction = JSON.stringify(this.receiptForTransaction);
+        }
+    }
 
 	switch(state) {
         case "PaymentTransactionStatePurchasing":
@@ -3150,7 +3167,14 @@ InAppPurchase.prototype.loadReceipts = function (callback, errorCb) {
     };
 
     function callCallback() {
-        protectCall(callback, 'loadReceipts.callback', data);
+        protectCall(callback, 'loadReceipts.callback', Object.assign({
+        forTransaction: function(transactionId) {
+    	    return that.receiptForTransaction[transactionId] || null;
+        },
+        forProduct: function(productId) {
+            return that.receiptForProduct[productId] || null;
+        }
+        },data));
     }
 
     log('loading appStoreReceipt');
@@ -3777,11 +3801,20 @@ function storekitRestoreCompleted() {
     store.trigger('refresh-completed');
 }
 
-function storekitRestoreFailed(/*errorCode*/) {
-    store.log.warn("ios -> restore failed");
+function storekitRestoreFailed(errorCode) {
+    store.log.warn("ios -> restore failed with code:" + errorCode);
+
+    // expected error codes:
+    // ---
+    // store.ERR_CLIENT_INVALID      = ERROR_CODES_BASE + 5; // Client is not allowed to issue the request.
+    // store.ERR_PAYMENT_CANCELLED   = ERROR_CODES_BASE + 6; // User cancelled the request.
+    // store.ERR_PAYMENT_INVALID     = ERROR_CODES_BASE + 7; // Purchase identifier was invalid.
+    // store.ERR_PAYMENT_NOT_ALLOWED = ERROR_CODES_BASE + 8; // This device is not allowed to make the payment
+    // store.ERR_UNKNOWN             = ERROR_CODES_BASE + 10;
+
     store.error({
         code: store.ERR_REFRESH,
-        message: "Failed to restore purchases during refresh"
+        message: "Failed to restore purchases during refresh (" + errorCode + ")"
     });
     store.trigger('refresh-failed');
 }
@@ -3839,7 +3872,10 @@ store._prepareForValidation = function(product, callback) {
             }
             storekitSetAppProductFromReceipt(data);
             product.transaction.appStoreReceipt = data.appStoreReceipt;
-            if (!product.transaction.appStoreReceipt) {
+            if (product.transaction.id) {
+        	product.transaction.transactionReceipt = data.forTransaction(product.transaction.id);
+            }
+            if (!product.transaction.appStoreReceipt && !product.transaction.transactionREceipt) {
                 nRetry ++;
                 if (nRetry < 2) {
                     setTimeout(loadReceipts, 500);

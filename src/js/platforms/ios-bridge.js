@@ -35,10 +35,18 @@ var protectCall = function (callback, context) {
 var InAppPurchase = function () {
     this.options = {};
 
+    this.receiptForTransaction = {};
+    this.receiptForProduct = {};
     this.transactionForProduct = {};
+
+    
+    if (window.localStorage && window.localStorage.sk_receiptForTransaction)
+	this.receiptForTransaction = JSON.parse(window.localStorage.sk_receiptForTransaction);
+    if (window.localStorage && window.localStorage.sk_receiptForProduct)
+	this.receiptForProduct = JSON.parse(window.localStorage.sk_receiptForProduct);
     if (window.localStorage && window.localStorage.sk_transactionForProduct)
         this.transactionForProduct = JSON.parse(window.localStorage.sk_transactionForProduct);
-
+    
     // Remove support for receipt.forTransaction(...)
     // `appStoreReceipt` is now the only supported receipt format on iOS (drops support for iOS <= 6)
     if (window.localStorage.sk_receiptForTransaction)
@@ -334,6 +342,15 @@ InAppPurchase.prototype.updatedTransactionCallback = function (state, errorCode,
         log("product " + productId + " has a transaction in progress: " + transactionIdentifier);
         this.transactionForProduct[productId] = transactionIdentifier;
     }
+    
+    if (transactionReceipt) {
+        this.receiptForProduct[productId] = transactionReceipt;
+        this.receiptForTransaction[transactionIdentifier] = transactionReceipt;
+        if (window.localStorage) {
+    	    window.localStorage.sk_receiptForProduct = JSON.stringify(this.receiptForProduct);
+            window.localStorage.sk_receiptForTransaction = JSON.stringify(this.receiptForTransaction);
+        }
+    }
 
 	switch(state) {
         case "PaymentTransactionStatePurchasing":
@@ -463,7 +480,14 @@ InAppPurchase.prototype.loadReceipts = function (callback, errorCb) {
     };
 
     function callCallback() {
-        protectCall(callback, 'loadReceipts.callback', data);
+        protectCall(callback, 'loadReceipts.callback', Object.assign({
+        forTransaction: function(transactionId) {
+    	    return that.receiptForTransaction[transactionId] || null;
+        },
+        forProduct: function(productId) {
+            return that.receiptForProduct[productId] || null;
+        }
+        },data));
     }
 
     log('loading appStoreReceipt');

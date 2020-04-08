@@ -644,7 +644,10 @@ store._prepareForValidation = function(product, callback) {
             }
             storekitSetAppProductFromReceipt(data);
             product.transaction.appStoreReceipt = data.appStoreReceipt;
-            if (!product.transaction.appStoreReceipt) {
+            if (product.transaction.id) {
+        	product.transaction.transactionReceipt = data.forTransaction(product.transaction.id);
+            }
+            if (!product.transaction.appStoreReceipt && !product.transaction.transactionREceipt) {
                 nRetry ++;
                 if (nRetry < 2) {
                     setTimeout(loadReceipts, 500);
